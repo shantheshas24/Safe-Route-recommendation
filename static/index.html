@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeRoute Bangalore | AI Route Planner</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #map { height: calc(100vh - 80px); width: 100%; border-radius: 12px; }
+        .leaflet-container { font-family: 'Inter', sans-serif; }
+        .risk-badge { padding: 2px 8px; border-radius: 4px; font-weight: bold; color: white; }
+        .risk-high { background-color: #ef4444; }
+        .risk-medium { background-color: #f59e0b; }
+        .risk-low { background-color: #10b981; }
+        
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Custom marker styling for safety points */
+        #toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: #1e293b;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 9999;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            opacity: 0;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            max-width: 400px;
+            text-align: center;
+        }
+        #toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+        .safety-marker {
+            background: white;
+            border: 2px solid #1e40af;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            font-size: 16px;
+        }
+        .safety-marker.hospital { border-color: #dc2626; }
+    </style>
+</head>
+<body class="bg-slate-50 font-sans">
+
+    <div id="toast"></div>
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b px-6 py-4 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <div class="bg-blue-600 p-2 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-2.223-1.112a2 2 0 01-1.117-1.788V5a2 2 0 011.117-1.788L9 2m6 18l2.223-1.112a2 2 0 001.117-1.788V5a2 2 0 00-1.117-1.788L15 2m-6 18V2m6 18V2" />
+                </svg>
+            </div>
+            <h1 class="text-xl font-bold text-slate-800 tracking-tight">SafeRoute <span class="text-blue-600">Bangalore</span></h1>
+        </div>
+        
+        <div class="flex gap-4 items-center">
+            <!-- Quick Jump Dropdown -->
+            <select id="area-jump" class="border rounded-md px-3 py-1.5 text-sm bg-blue-50 border-blue-200 text-blue-700 font-medium outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                <option value="" disabled selected>📍 Jump to Area</option>
+                <option value="12.9716,77.5946">MG Road / Central</option>
+                <option value="12.9279,77.6271">Koramangala</option>
+                <option value="12.9141,77.5890">Jayanagar</option>
+                <option value="12.9784,77.6408">Indiranagar</option>
+                <option value="13.0285,77.5896">Hebbal</option>
+                <option value="12.9128,77.6387">HSR Layout</option>
+                <option value="12.9698,77.7499">Whitefield</option>
+                <option value="12.9925,77.5630">Malleshwaram</option>
+                <option value="13.0113,77.5550">Yeshwanthpur</option>
+                <option value="12.8391,77.6766">Electronic City</option>
+            </select>
+
+            <!-- Safety Overlays -->
+            <div class="flex items-center bg-slate-100 rounded-lg p-1 border">
+                <button id="btn-police" class="px-3 py-1.5 text-xs font-bold rounded-md transition-all hover:bg-white flex items-center gap-1">
+                    <span>👮</span> Police
+                </button>
+                <button id="btn-hospitals" class="px-3 py-1.5 text-xs font-bold rounded-md transition-all hover:bg-white flex items-center gap-1">
+                    <span>🏥</span> Hospitals
+                </button>
+            </div>
+
+            <select id="day-select" class="border rounded-md px-3 py-1.5 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+                <option value="Sunday">Sunday</option>
+            </select>
+            
+            <div class="flex items-center gap-2">
+                <input type="range" id="hour-range" min="0" max="23" value="12" class="w-24 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                <span id="hour-display" class="text-sm font-semibold text-slate-600 w-10 text-center">12:00</span>
+            </div>
+            
+            <button id="find-route-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md active:scale-95 disabled:opacity-50 text-sm">
+                Plan Route
+            </button>
+            <button id="clear-map-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-medium transition-all text-sm">
+                Clear Map
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <main class="p-4 grid grid-cols-12 gap-4">
+        <!-- Sidebar -->
+        <aside class="col-span-3 space-y-4">
+            <div class="bg-white p-5 rounded-xl shadow-sm border">
+                <h2 class="font-bold text-slate-700 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    Trip Details
+                </h2>
+                <div class="space-y-3">
+                    <p class="text-[10px] text-slate-400 italic mb-2 leading-tight">Right-click anywhere to check area risk score. Use buttons above to show safety points.</p>
+                    <div>
+                        <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">Start Location</label>
+                        <div id="start-label" class="text-xs text-slate-600 bg-slate-50 p-2 rounded border truncate italic">Click map to set</div>
+                    </div>
+                    <div>
+                        <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 block">End Location</label>
+                        <div id="end-label" class="text-xs text-slate-600 bg-slate-50 p-2 rounded border truncate italic">Click map to set</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="route-stats" class="bg-white p-5 rounded-xl shadow-sm border hidden fade-in">
+                <h2 class="font-bold text-slate-700 mb-3 text-xs uppercase tracking-wider">Route Analysis</h2>
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
+                        <span class="text-[10px] font-bold text-blue-600 uppercase">Distance</span>
+                        <span id="stat-dist" class="text-lg font-bold text-blue-700">0.0 km</span>
+                    </div>
+                    <div class="flex justify-between items-center p-3 bg-red-50 rounded-lg">
+                        <span class="text-[10px] font-bold text-red-600 uppercase">Avg Risk</span>
+                        <span id="stat-risk" class="text-lg font-bold text-red-700">0.0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-slate-800 text-white p-4 rounded-xl shadow-lg border-t-4 border-blue-500">
+                <h3 class="text-xs font-bold uppercase tracking-widest text-blue-400 mb-2">Safety Tip</h3>
+                <p class="text-[11px] leading-relaxed opacity-80">
+                    Always share your live location with a trusted contact when traveling through high-risk zones after dark.
+                </p>
+            </div>
+        </aside>
+
+        <!-- Map -->
+        <section class="col-span-9 relative">
+            <div id="map"></div>
+            <div id="loading" class="absolute inset-0 bg-white/60 z-[1000] hidden flex items-center justify-center rounded-xl backdrop-blur-[2px]">
+                <div class="bg-white p-6 rounded-2xl shadow-xl border flex flex-col items-center">
+                    <div class="animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent"></div>
+                    <p class="mt-4 font-bold text-slate-800">Calculating Safest Route...</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map').setView([12.9716, 77.5946], 12);
+
+        // Toast helper — replaces blocking alert() for non-critical messages
+        let toastTimer = null;
+        function showToast(msg, durationMs = 4000) {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => el.classList.remove('show'), durationMs);
+        }
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        let startMarker = null, endMarker = null, routeLine = null;
+        // Separate layer groups so police & hospitals are independent
+        const layers = {
+            police:   L.layerGroup().addTo(map),
+            hospital: L.layerGroup().addTo(map)
+        };
+        const active = { police: false, hospital: false };
+
+        const startLabel = document.getElementById('start-label');
+        const endLabel = document.getElementById('end-label');
+        const hourRange = document.getElementById('hour-range');
+        const hourDisplay = document.getElementById('hour-display');
+        const areaJump = document.getElementById('area-jump');
+
+        hourRange.oninput = () => { hourDisplay.innerText = `${hourRange.value.padStart(2, '0')}:00`; };
+
+        // Handle Area Jump
+        areaJump.onchange = (e) => {
+            const [lat, lon] = e.target.value.split(',').map(Number);
+            map.flyTo([lat, lon], 15, {
+                duration: 1.5
+            });
+            // Reset the dropdown label after jump
+            setTimeout(() => { e.target.selectedIndex = 0; }, 2000);
+        };
+
+        /**
+         * Haversine distance between two points in metres.
+         */
+        function haversineMetres(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const toRad = d => d * Math.PI / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = Math.sin(dLat/2)**2 +
+                      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        /**
+         * Returns true if [lat, lon] is within maxDistM metres of ANY node in the route.
+         */
+        function isNearRoute(lat, lon, routeLatLngs, maxDistM) {
+            for (const pt of routeLatLngs) {
+                if (haversineMetres(lat, lon, pt.lat, pt.lng) <= maxDistM) return true;
+            }
+            return false;
+        }
+
+        // How close (metres) a POI must be to the route corridor to be shown.
+        const PROXIMITY_M = 500;
+
+        /**
+         * Fetch Safety Data from Overpass API.
+         * Each type (police/hospital) has its own layer and toggle state.
+         */
+        async function toggleSafetyPOIs(type) {
+            const amenity = type === 'police' ? 'police' : 'hospital';
+            const iconEmoji = type === 'police' ? '👮' : '🏥';
+            const markerClass = type === 'hospital' ? 'safety-marker hospital' : 'safety-marker';
+            const label = amenity === 'police' ? 'police stations' : 'hospitals';
+            const btn = document.getElementById(`btn-${type}`);
+
+            // If already ON, turn it off
+            if (active[type]) {
+                layers[type].clearLayers();
+                active[type] = false;
+                btn.classList.remove('bg-white', 'shadow', 'text-blue-700');
+                return;
+            }
+
+            // Use route bounds (+ small pad) when a route exists; otherwise use map viewport.
+            let bbox;
+            let routeLatLngs = null;
+
+            if (routeLine) {
+                routeLatLngs = routeLine.getLatLngs();
+                const rb = routeLine.getBounds();
+                const pad = 0.01;
+                bbox = `${rb.getSouth() - pad},${rb.getWest() - pad},${rb.getNorth() + pad},${rb.getEast() + pad}`;
+            } else {
+                const bounds = map.getBounds();
+                bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+            }
+
+            const query = `[out:json][timeout:25];node["amenity"="${amenity}"](${bbox});out body;`;
+            const encodedQuery = encodeURIComponent(query);
+
+            const OVERPASS_MIRRORS = [
+                `https://overpass-api.de/api/interpreter?data=${encodedQuery}`,
+                `https://overpass.kumi.systems/api/interpreter?data=${encodedQuery}`,
+                `https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=${encodedQuery}`
+            ];
+
+            async function fetchOverpass(mirrors) {
+                for (const url of mirrors) {
+                    try {
+                        const res = await fetch(url, { mode: 'cors' });
+                        if (!res.ok) continue;
+                        const data = await res.json();
+                        if (data && Array.isArray(data.elements)) return data;
+                    } catch (e) {
+                        console.warn(`Overpass mirror failed: ${url}`, e);
+                    }
+                }
+                return null;
+            }
+
+            try {
+                const data = await fetchOverpass(OVERPASS_MIRRORS);
+
+                if (!data) {
+                    showToast("⚠️ Could not load safety points (Overpass API unavailable). Route planning still works normally.");
+                    return;
+                }
+
+                let elements = data.elements;
+                if (routeLatLngs && routeLatLngs.length > 0) {
+                    elements = elements.filter(el =>
+                        isNearRoute(el.lat, el.lon, routeLatLngs, PROXIMITY_M)
+                    );
+                }
+
+                if (elements.length === 0) {
+                    const context = routeLine ? `within ${PROXIMITY_M} m of your route` : 'in the current map area';
+                    showToast(`ℹ️ No ${label} found ${context}.`);
+                    return;
+                }
+
+                layers[type].clearLayers();
+                elements.forEach(el => {
+                    const name = el.tags.name || (amenity === 'police' ? 'Police Station' : 'Hospital');
+                    const marker = L.marker([el.lat, el.lon], {
+                        icon: L.divIcon({
+                            className: markerClass,
+                            html: `<div>${iconEmoji}</div>`,
+                            iconSize: [32, 32]
+                        })
+                    }).bindPopup(`
+                        <div class="font-sans">
+                            <b class="text-blue-700 text-sm">${name}</b>
+                            <div class="text-[10px] text-slate-500 mt-1">${amenity === 'police' ? 'Police station' : 'Hospital'}</div>
+                            ${routeLine ? `<div class="text-[10px] text-green-600 mt-1">📍 Near your route</div>` : ''}
+                        </div>
+                    `);
+                    layers[type].addLayer(marker);
+                });
+
+                // Mark as active and style the button
+                active[type] = true;
+                btn.classList.add('bg-white', 'shadow', 'text-blue-700');
+
+            } catch (err) {
+                console.error("Overpass Fetch Error:", err);
+                showToast("⚠️ Unexpected error loading safety points. Check browser console.");
+            }
+        }
+
+        document.getElementById('btn-police').onclick = () => toggleSafetyPOIs('police');
+        document.getElementById('btn-hospitals').onclick = () => toggleSafetyPOIs('hospital');
+
+        map.on('contextmenu', async (e) => {
+            const popup = L.popup().setLatLng(e.latlng).setContent('<div class="p-2 text-xs">Analyzing...</div>').openOn(map);
+            try {
+                const response = await fetch('http://localhost:8000/get-point-risk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        lat: e.latlng.lat, lon: e.latlng.lng,
+                        hour: parseInt(hourRange.value),
+                        day: document.getElementById('day-select').value
+                    })
+                });
+                const data = await response.json();
+                const badge = `risk-${data.level.toLowerCase()}`;
+                popup.setContent(`
+                    <div class="p-1 fade-in min-w-[120px]">
+                        <div class="text-[10px] font-bold text-slate-400 uppercase">Risk Level</div>
+                        <div class="text-lg font-black text-slate-800 my-1">${data.risk_score.toFixed(4)}</div>
+                        <div class="risk-badge ${badge} text-center text-[10px] uppercase">${data.level}</div>
+                    </div>
+                `);
+            } catch (err) { popup.setContent('Error loading risk data.'); }
+        });
+
+        map.on('click', (e) => {
+            if (!startMarker) {
+                startMarker = L.marker(e.latlng, { draggable: true }).addTo(map).bindPopup("Start");
+                startLabel.innerText = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+                startLabel.classList.remove('italic');
+            } else if (!endMarker) {
+                endMarker = L.marker(e.latlng, { draggable: true }).addTo(map).bindPopup("End");
+                endLabel.innerText = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+                endLabel.classList.remove('italic');
+            }
+        });
+
+        document.getElementById('clear-map-btn').onclick = () => {
+            if (startMarker) map.removeLayer(startMarker);
+            if (endMarker) map.removeLayer(endMarker);
+            if (routeLine) map.removeLayer(routeLine);
+            layers.police.clearLayers();
+            layers.hospital.clearLayers();
+            active.police = false;
+            active.hospital = false;
+            document.getElementById('btn-police').classList.remove('bg-white', 'shadow', 'text-blue-700');
+            document.getElementById('btn-hospitals').classList.remove('bg-white', 'shadow', 'text-blue-700');
+            startMarker = null; endMarker = null; routeLine = null;
+            startLabel.innerText = "Click map to set"; startLabel.classList.add('italic');
+            endLabel.innerText = "Click map to set"; endLabel.classList.add('italic');
+            document.getElementById('route-stats').classList.add('hidden');
+        };
+
+        document.getElementById('find-route-btn').onclick = async () => {
+            if (!startMarker || !endMarker) return alert("Set Start and End first.");
+
+            document.getElementById('loading').classList.remove('hidden');
+            try {
+                const response = await fetch('http://localhost:8000/get-safe-route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start_lat: startMarker.getLatLng().lat, start_lon: startMarker.getLatLng().lng,
+                        end_lat: endMarker.getLatLng().lat, end_lon: endMarker.getLatLng().lng,
+                        hour: parseInt(hourRange.value), day: document.getElementById('day-select').value
+                    })
+                });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    console.error('Route API error', response.status, errText);
+                    alert('Routing service error: ' + (errText || response.status));
+                } else {
+                    const data = await response.json();
+                    console.log('Route response', data);
+                    if (data.status === 'success' && data.route && data.route.length > 1) {
+                        if (routeLine) map.removeLayer(routeLine);
+                        routeLine = L.polyline(data.route, { color: '#2563eb', weight: 5, opacity: 0.8 }).addTo(map);
+                        map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+                        document.getElementById('route-stats').classList.remove('hidden');
+                        document.getElementById('stat-dist').innerText = data.total_distance_km.toFixed(2) + ' km';
+                        document.getElementById('stat-risk').innerText = data.total_penalty.toFixed(3);
+                    } else {
+                        alert(data.message || 'No route returned. Please choose different points.');
+                    }
+                }
+            } catch (err) {
+                console.error('Fetch failed', err);
+                alert('Backend unreachable. Start the server and refresh.');
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        };
+    </script>
+</body>
+</html>
